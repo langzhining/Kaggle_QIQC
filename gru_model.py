@@ -1,13 +1,14 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from attention_cnn_model import SelfAttention
-
 
 
 class GlobalMaxPooling1D(nn.Module):
     def __init__(self, pool_dim=1):
         super(GlobalMaxPooling1D, self).__init__()
         self.pool_dim = pool_dim
+
     def forward(self, inputs):
         z, _ = torch.max(inputs, self.pool_dim)
         return z
@@ -15,6 +16,20 @@ class GlobalMaxPooling1D(nn.Module):
     def __repr__(self):
         return self.__class__.__name__ + '()'
 
+
+class Attention(nn.Module):
+    def __init__(self, hidden_size):
+        super(Attention, self).__init__()
+        self.query = nn.Linear(hidden_size, 1, bias=False)
+
+    def forward(self, hiddens, mask):
+        # hiddens: (batch, seq_len, hidden_size)
+        # weight : (batch, seq_len, 1)
+        # out : (batch, hidden_size)
+        weight = self.query(hiddens)
+        weight = F.softmax(weight, dim=1)
+        out = (hiddens * weight).sum(dim=1)
+        return out
 
 class CNN(nn.Module):
     def __init__(self, hidden_size, filters=64, dropout=0.2):
@@ -45,7 +60,7 @@ class CNN(nn.Module):
 
 class GRUModel(nn.Module):
     def __init__(self, pretrained_embedding, proj_dim, rnn_dim, n_layers, bidirectional, dense_dim,
-                 padding_idx=0, fix_embedding=True, attn_layer=None, cnn_layer=None, dropout=0.2,
+                 padding_idx=0, fix_embedding=True, attn_layer=None, cnn_layer=None, dropout=0.4,
                  n_out=1):
         super(GRUModel, self).__init__()
         # self.n_vocab = n_vocab
@@ -73,6 +88,7 @@ class GRUModel(nn.Module):
         self.dense_act = nn.ReLU()
         self.out_linear = nn.Linear(dense_dim, n_out)
         self.dropout = nn.Dropout(dropout)
+        self.embed_dropout = nn.Dropout(dropout)
         self.init_weights()
 
     def init_weights(self):
@@ -84,13 +100,15 @@ class GRUModel(nn.Module):
 
     def forward(self, inputs, *args):
         # inputs: (bs, max_len)
-
         x = self.embed(inputs)
+        x = x.permute(0, 2, 1)  # convert to [batch, channels, time]
+        x = self.embed_dropout(x)
+        x = x.permute(0, 2, 1)  # back to [batch, time, channels]
         x = self.proj_act(self.proj(x))
         x, hidden = self.gru(x)
         if self.attn_layer is not None:
             x = self.attn_layer(x, args[0])
-        if self.cnn_layer is not None:
+        elif self.cnn_layer is not None:
             x = self.cnn_layer(x)
         else:
             x = self.pooling(x)
@@ -108,9 +126,10 @@ def model_build(embedding_matrix, config):
     dense_dim = config.dense_dim
     fix_embedding = config.fix_embedding
     hidden_size = rnn_dim * 2 if bidirectional else rnn_dim
+    attn_layer = Attention(hidden_size)
     # attn_layer = SelfAttention(attn_size, heads=4)
     # cnn_layer = CNN(hidden_size, hidden_size)
     cnn_layer = None
     model = GRUModel(embedding_matrix, proj_dim, rnn_dim, n_layers, bidirectional, dense_dim,
-                     fix_embedding=fix_embedding, padding_idx=0, cnn_layer=cnn_layer)
+                     fix_embedding=fix_embedding, padding_idx=0, attn_layer=attn_layer)
     return model
