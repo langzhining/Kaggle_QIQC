@@ -115,11 +115,11 @@ if __name__ == '__main__':
     # print(list(model.parameters())
     optimizer = Adam(model.parameters())
     model.cuda()
-    for _ in range(8):
+    for _ in range(12):
         model.train()
         loss = run_epoch(model, train_loader, optimizer)
         model.eval()
-        eval_data(model, eval_loader, y_eval=y_eval, threshold=[0.3,0.35,0.4,0.45])
+        eval_data(model, eval_loader, y_eval=y_eval, threshold=[0.25, 0.3,0.35,0.4,0.45,0.5])
 
 
 
